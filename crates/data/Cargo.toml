@@ -1,0 +1,21 @@
+[package]
+name = "exhibit-data"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+exhibit-domain = { path = "../domain" }
+krilla = { version = "0.8.2", features = ["pdf", "raster-images"] }
+krilla-svg = "0.8.1"
+usvg = "0.47"
+hayro = "0.8"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp", "tga", "qoi", "pnm"] }
+jxl-oxide = "0.12"
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Graphics_Imaging", "Win32_System_Com", "Win32_Foundation"] }

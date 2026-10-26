@@ -893,6 +893,7 @@ dependencies = [
  "jxl-oxide",
  "krilla",
  "krilla-svg",
+ "usvg",
  "windows",
 ]
 
