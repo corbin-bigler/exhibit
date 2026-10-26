@@ -6,7 +6,7 @@ use std::sync::Arc;
 use exhibit_data::{FileSink, KrillaRenderer, SourceStore};
 use exhibit_domain::items::{ArtKind, ItemId};
 use exhibit_domain::job::build_print_job;
-use exhibit_domain::ports::{SheetRenderer, SourceLibrary};
+use exhibit_domain::ports::{ExportOptions, SheetRenderer, SourceLibrary};
 use exhibit_domain::usecases::{ExportPdf, ImportFiles};
 use exhibit_domain::workspace::Workspace;
 use image::{ImageBuffer, ImageEncoder, Rgb, Rgba};
@@ -132,7 +132,7 @@ fn export_only(workspace: &mut Workspace, renderer: &KrillaRenderer, keep: &[Ite
             workspace.remove(id).unwrap();
         }
     }
-    renderer.render_pdf(&build_print_job(workspace)).unwrap()
+    renderer.render_pdf(&build_print_job(workspace), &ExportOptions::default()).unwrap()
 }
 
 // IMP-01..08, IMP-11..13
@@ -230,8 +230,30 @@ fn export_writes_the_file() {
     import.execute(&mut ws, &[fx.pdf()]);
     let export = ExportPdf { renderer: Arc::new(renderer), sink: Arc::new(FileSink) };
     let out = fx.dir.join("out.pdf");
-    assert_eq!(export.execute(&ws, &out).unwrap(), 2);
+    assert_eq!(export.execute(&ws, &out, &ExportOptions::default()).unwrap(), 2);
     assert_eq!(page_count(&std::fs::read(&out).unwrap()), 2);
     assert!(!Path::new(&fx.dir.join("out.pdf.partial")).exists());
     drop(store);
+}
+
+// X-04: the "downsample to N dpi" export choice
+#[test]
+fn capping_resolution_resamples_only_images_above_it() {
+    let fx = Fixtures::new("downsample");
+    let (_, renderer, import) = setup();
+    let mut ws = Workspace::default();
+    import.execute(&mut ws, &[fx.jpeg()]);
+    // 10 × 10 grid on 12×18 → ~1.1 × 1.7 in slots, so the 300×200 JPEG prints at ~170 dpi.
+    ws.settings.layout = exhibit_domain::settings::LayoutMode::ByGrid { across: 10, down: 10 };
+    let job = build_print_job(&ws);
+
+    let untouched = renderer.render_pdf(&job, &ExportOptions { max_dpi: Some(600.0) }).unwrap();
+    assert_eq!(count(&untouched, b"/DCTDecode"), 1, "below the cap: original JPEG kept");
+
+    let capped = renderer.render_pdf(&job, &ExportOptions { max_dpi: Some(72.0) }).unwrap();
+    assert_eq!(count(&capped, b"/DCTDecode"), 0, "above the cap: resampled");
+    assert_eq!(count(&capped, b"/Width 300"), 0);
+    if fx.icc.is_some() {
+        assert!(count(&capped, b"/ICCBased") >= 1, "resampled image keeps its ICC profile");
+    }
 }

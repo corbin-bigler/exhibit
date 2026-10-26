@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::items::{ItemId, SourceId};
-use crate::job::{PrintJob, build_print_job};
+use crate::job::{HeavySheet, PrintJob, build_print_job, heavy_sheets};
 use crate::layout::{SlotLayout, layout_slots};
-use crate::ports::{Bitmap, DocumentSink, PortError, SheetRenderer, SourceLibrary};
+use crate::ports::{Bitmap, DocumentSink, ExportOptions, PortError, SheetRenderer, SourceLibrary};
 use crate::settings::{JobSettings, LayoutMode};
 use crate::workspace::{Workspace, WorkspaceError};
 
@@ -154,6 +154,15 @@ impl RenderPreview {
     }
 }
 
+/// Run before exporting: sheets heavy enough that a printer may choke on them.
+pub struct CheckExport;
+
+impl CheckExport {
+    pub fn execute(&self, workspace: &Workspace) -> Vec<HeavySheet> {
+        heavy_sheets(&build_print_job(workspace))
+    }
+}
+
 pub struct ExportPdf {
     pub renderer: Arc<dyn SheetRenderer>,
     pub sink: Arc<dyn DocumentSink>,
@@ -161,12 +170,12 @@ pub struct ExportPdf {
 
 impl ExportPdf {
     /// Returns the number of sheets written.
-    pub fn execute(&self, workspace: &Workspace, path: &Path) -> Result<usize, PortError> {
+    pub fn execute(&self, workspace: &Workspace, path: &Path, options: &ExportOptions) -> Result<usize, PortError> {
         let job = build_print_job(workspace);
         if job.sheets.is_empty() {
             return Err(PortError("there are no sheets to export".into()));
         }
-        let bytes = self.renderer.render_pdf(&job)?;
+        let bytes = self.renderer.render_pdf(&job, options)?;
         self.sink.write(path, &bytes)?;
         Ok(job.sheets.len())
     }

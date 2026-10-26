@@ -1,14 +1,17 @@
 //! Drawing print jobs with krilla. The export and the on-screen preview share this code; the
 //! preview only swaps raster art for small proxies and rasterises the result with hayro.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use exhibit_domain::art::ArtFrame;
+use exhibit_domain::art::{ArtFrame, effective_dpi};
 use exhibit_domain::geometry::{Line, Rect};
 use exhibit_domain::items::ArtKind;
 use exhibit_domain::job::{Placement, PrintJob, SheetJob};
 use exhibit_domain::marks::MARK_WEIGHT;
-use exhibit_domain::ports::{Bitmap, PortError, SheetRenderer};
+use exhibit_domain::ports::{Bitmap, ExportOptions, PortError, SheetRenderer};
+use exhibit_domain::units::POINTS_PER_INCH;
 use exhibit_domain::settings::BleedMode;
 use krilla::configure::{ConfigurationBuilder, PdfVersion};
 use krilla::error::KrillaError;
@@ -23,11 +26,14 @@ use krilla_svg::{SurfaceExt, SvgSettings};
 
 use crate::library::{Content, Entry, SourceStore};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq)]
 enum Quality {
-    Print,
+    Print { max_dpi: Option<f64> },
     Proxy,
 }
+
+/// Downsampled images made during one export, keyed by entry address and pixel size.
+type DownsampleCache = RefCell<HashMap<(usize, u32, u32), Option<Image>>>;
 
 /// Width of the art strip stretched by Edge bleed when the art is vector, in points.
 const VECTOR_EDGE_SAMPLE: f64 = 0.5;
@@ -43,8 +49,8 @@ impl KrillaRenderer {
 }
 
 impl SheetRenderer for KrillaRenderer {
-    fn render_pdf(&self, job: &PrintJob) -> Result<Vec<u8>, PortError> {
-        write_pdf(&self.store, job, &job.sheets, Quality::Print).map_err(PortError)
+    fn render_pdf(&self, job: &PrintJob, options: &ExportOptions) -> Result<Vec<u8>, PortError> {
+        write_pdf(&self.store, job, &job.sheets, Quality::Print { max_dpi: options.max_dpi }).map_err(PortError)
     }
 
     fn render_preview(&self, job: &PrintJob, sheet: usize, pixels_per_point: f64) -> Result<Bitmap, PortError> {
@@ -57,6 +63,7 @@ impl SheetRenderer for KrillaRenderer {
 
 fn write_pdf(store: &SourceStore, job: &PrintJob, sheets: &[SheetJob], quality: Quality) -> Result<Vec<u8>, String> {
     let mut version = PdfVersion::Pdf17;
+    let cache = DownsampleCache::default();
     loop {
         let configuration = ConfigurationBuilder::new().with_version(version).finish().map_err(|e| format!("{e:?}"))?;
         let mut document = Document::new_with(SerializeSettings { configuration, ..SerializeSettings::default() });
@@ -65,7 +72,7 @@ fn write_pdf(store: &SourceStore, job: &PrintJob, sheets: &[SheetJob], quality: 
                 .ok_or("sheet size is invalid")?;
             let mut page = document.start_page_with(settings);
             let mut surface = page.surface();
-            draw_sheet(&mut surface, store, sheet, quality)?;
+            draw_sheet(&mut surface, store, sheet, quality, &cache)?;
             surface.finish();
             page.finish();
         }
@@ -78,10 +85,16 @@ fn write_pdf(store: &SourceStore, job: &PrintJob, sheets: &[SheetJob], quality: 
     }
 }
 
-fn draw_sheet(surface: &mut Surface, store: &SourceStore, sheet: &SheetJob, quality: Quality) -> Result<(), String> {
+fn draw_sheet(
+    surface: &mut Surface,
+    store: &SourceStore,
+    sheet: &SheetJob,
+    quality: Quality,
+    cache: &DownsampleCache,
+) -> Result<(), String> {
     for placement in &sheet.placements {
         let entry = store.get(placement.art_ref.source).ok_or("a file used on this sheet was removed")?;
-        draw_placement(surface, &entry, placement, quality);
+        draw_placement(surface, &entry, placement, quality, cache);
     }
     surface.set_fill(None);
     surface.set_stroke(Some(Stroke { width: MARK_WEIGHT as f32, ..Stroke::default() }));
@@ -99,8 +112,8 @@ fn draw_sheet(surface: &mut Surface, store: &SourceStore, sheet: &SheetJob, qual
     Ok(())
 }
 
-fn draw_placement(surface: &mut Surface, entry: &Entry, p: &Placement, quality: Quality) {
-    let art = Art { entry, page: p.art_ref.art.page, quality };
+fn draw_placement(surface: &mut Surface, entry: &Entry, p: &Placement, quality: Quality, cache: &DownsampleCache) {
+    let art = Art { entry, page: p.art_ref.art.page, quality, limit: downsample_target(p, quality), cache: Some(cache) };
     with_clip(surface, &p.clip(), |s| match p.bleed_mode {
         BleedMode::Scale => art.draw_framed(s, &p.frame),
         BleedMode::Mirror | BleedMode::Edge => {
@@ -115,6 +128,19 @@ fn draw_placement(surface: &mut Surface, entry: &Entry, p: &Placement, quality: 
             }
         }
     });
+}
+
+/// Pixel size to resample raster art to when it exceeds the export's resolution cap.
+fn downsample_target(p: &Placement, quality: Quality) -> Option<(u32, u32)> {
+    let Quality::Print { max_dpi: Some(max) } = quality else { return None };
+    let dpi = effective_dpi(p.art_ref.art.kind, &p.frame)?;
+    if dpi <= max + 0.5 {
+        return None;
+    }
+    let r = p.frame.rect;
+    let (w, h) = if p.frame.rotated { (r.height, r.width) } else { (r.width, r.height) };
+    let px = |pt: f64| ((pt / POINTS_PER_INCH * max).ceil() as u32).max(1);
+    Some((px(w), px(h)))
 }
 
 /// How much of the art's edge Edge bleed stretches: one source pixel, or a hairline for vectors.
@@ -207,9 +233,29 @@ struct Art<'a> {
     entry: &'a Entry,
     page: usize,
     quality: Quality,
+    /// Resample raster art to this pixel size instead of embedding the original.
+    limit: Option<(u32, u32)>,
+    cache: Option<&'a DownsampleCache>,
 }
 
 impl Art<'_> {
+    fn downsampled(&self, (w, h): (u32, u32)) -> Option<Image> {
+        let key = (self.entry as *const Entry as usize, w, h);
+        let mut cache = self.cache?.borrow_mut();
+        cache
+            .entry(key)
+            .or_insert_with(|| {
+                let full = match &self.entry.content {
+                    // Decoding applies EXIF orientation, so the result is drawn upright.
+                    Content::Embedded { bytes, .. } => crate::decode::decode_with_image_crate(bytes).ok()?,
+                    Content::Decoded(decoded) => decoded.clone(),
+                    Content::Pdf { .. } | Content::Svg(_) => return None,
+                };
+                Image::from_custom(full.resampled(w, h)?, false).ok()
+            })
+            .clone()
+    }
+
     /// Draw the art into its frame, turning it 90° clockwise when the frame says so.
     fn draw_framed(&self, surface: &mut Surface, frame: &ArtFrame) {
         let r = frame.rect;
@@ -226,6 +272,10 @@ impl Art<'_> {
     /// Draw the art upright into `(0, 0, w, h)`.
     fn draw_natural(&self, surface: &mut Surface, w: f32, h: f32) {
         let Some(size) = Size::from_wh(w, h) else { return };
+        if let Some(image) = self.limit.and_then(|limit| self.downsampled(limit)) {
+            surface.draw_image(image, size);
+            return;
+        }
         if self.quality == Quality::Proxy {
             if let Some(proxy) = self.entry.proxy() {
                 surface.draw_image(proxy, size);
@@ -304,7 +354,7 @@ pub(crate) fn thumbnail(entry: &Entry, page: usize, max_px: u32) -> Result<Bitma
     let mut document = Document::new();
     let mut pdf_page = document.start_page_with(PageSettings::from_wh(w, h).ok_or("empty art")?);
     let mut surface = pdf_page.surface();
-    Art { entry, page, quality: Quality::Proxy }.draw_natural(&mut surface, w, h);
+    Art { entry, page, quality: Quality::Proxy, limit: None, cache: None }.draw_natural(&mut surface, w, h);
     surface.finish();
     pdf_page.finish();
     rasterize(document.finish().map_err(|e| e.to_string())?, 1.0)

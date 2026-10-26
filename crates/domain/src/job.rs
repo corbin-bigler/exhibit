@@ -2,7 +2,7 @@
 
 use crate::art::{ArtFrame, effective_dpi, frame_art};
 use crate::geometry::{Line, Rect, Sides, Size};
-use crate::items::{ItemId, PageArt, SourceId};
+use crate::items::{ArtKind, ItemId, PageArt, SourceId};
 use crate::layout::{SlotLayout, layout_slots};
 use crate::marks::{bleed_sides, crop_marks};
 use crate::settings::{BleedMode, Scaling};
@@ -102,6 +102,37 @@ pub fn build_print_job(workspace: &Workspace) -> PrintJob {
     PrintJob { sheet: Size::new(settings.sheet.width, settings.sheet.height), sheets }
 }
 
+/// Image data a RIP must process for one sheet before it warns, in megapixels. Counts every
+/// placement, because a printer rasterises each copy even when the PDF stores the image once.
+pub const SHEET_MEGAPIXEL_BUDGET: f64 = 500.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HeavySheet {
+    pub sheet: usize,
+    pub megapixels: f64,
+    /// Highest effective resolution among the sheet's raster placements.
+    pub max_dpi: f64,
+}
+
+/// Sheets whose raster image data exceeds the budget.
+pub fn heavy_sheets(job: &PrintJob) -> Vec<HeavySheet> {
+    job.sheets
+        .iter()
+        .enumerate()
+        .filter_map(|(sheet, s)| {
+            let mut megapixels = 0.0;
+            let mut max_dpi: f64 = 0.0;
+            for p in &s.placements {
+                if let ArtKind::Raster { width_px, height_px } = p.art_ref.art.kind {
+                    megapixels += width_px as f64 * height_px as f64 / 1_000_000.0;
+                    max_dpi = max_dpi.max(effective_dpi(p.art_ref.art.kind, &p.frame).unwrap_or(0.0));
+                }
+            }
+            (megapixels > SHEET_MEGAPIXEL_BUDGET).then_some(HeavySheet { sheet, megapixels, max_dpi })
+        })
+        .collect()
+}
+
 /// Effective resolution of an item's first page at the current slot size.
 pub fn item_dpi(layout: &SlotLayout, art: &PageArt, scaling: Scaling) -> Option<f64> {
     let slot = layout.slots.first()?;
@@ -160,6 +191,29 @@ mod tests {
         assert!(build_print_job(&ws).sheets[0].trim_lines.is_empty());
         ws.settings.marks.trim_lines = true;
         assert_eq!(build_print_job(&ws).sheets[0].trim_lines.len(), 4);
+    }
+
+    // X-04
+    #[test]
+    fn many_copies_of_a_huge_image_flag_the_sheet() {
+        let mut ws = Workspace::default();
+        ws.add(ImportedSource {
+            id: SourceId(1),
+            name: "8k.jpg".into(),
+            format: SourceFormat::Jpeg,
+            pages: vec![PageArt {
+                page: 0,
+                size: Size::new(7680.0, 4320.0),
+                kind: ArtKind::Raster { width_px: 7680, height_px: 4320 },
+            }],
+        });
+        assert!(heavy_sheets(&build_print_job(&ws)).is_empty(), "4 up of 33 MP is fine");
+        ws.settings.layout = crate::settings::LayoutMode::ByGrid { across: 6, down: 10 };
+        let heavy = heavy_sheets(&build_print_job(&ws));
+        assert_eq!(heavy.len(), 1);
+        assert!(heavy[0].megapixels > 1900.0);
+        // ~1.81 × 1.64 in slots; Fill draws the 16:9 art 2.9 in wide → ~2650 dpi.
+        assert!(heavy[0].max_dpi > 2500.0);
     }
 
     // B-05

@@ -24,10 +24,16 @@ pub trait SourceLibrary: Send + Sync {
     fn thumbnail(&self, source: SourceId, page: usize, max_px: u32) -> Result<Bitmap, PortError>;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct ExportOptions {
+    /// Downsample raster placements above this effective resolution. `None` keeps originals.
+    pub max_dpi: Option<f64>,
+}
+
 /// Draws a print job.
 pub trait SheetRenderer: Send + Sync {
     /// The full-quality PDF.
-    fn render_pdf(&self, job: &PrintJob) -> Result<Vec<u8>, PortError>;
+    fn render_pdf(&self, job: &PrintJob, options: &ExportOptions) -> Result<Vec<u8>, PortError>;
     /// One sheet as a bitmap, drawn by the same code path as the PDF but from lightweight proxies.
     fn render_preview(&self, job: &PrintJob, sheet: usize, pixels_per_point: f64) -> Result<Bitmap, PortError>;
 }

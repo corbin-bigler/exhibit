@@ -162,6 +162,60 @@ impl DecodedImage {
     }
 }
 
+impl DecodedImage {
+    /// The pixels back as an `image` buffer, for resampling. `None` for CMYK.
+    fn to_dynamic(&self) -> Option<DynamicImage> {
+        use image::{ImageBuffer, Luma, LumaA, Rgb, Rgba};
+        let (w, h) = (self.width, self.height);
+        let n = match self.colorspace {
+            ImageColorspace::Luma => 1,
+            ImageColorspace::Rgb => 3,
+            ImageColorspace::Cmyk => return None,
+        };
+        let has_alpha = self.alpha.is_some();
+        let channels = n + has_alpha as usize;
+        if self.sixteen_bit {
+            let mut samples = Vec::with_capacity((w * h) as usize * channels);
+            for i in 0..(w * h) as usize {
+                for c in 0..n {
+                    let at = (i * n + c) * 2;
+                    samples.push(u16::from_be_bytes([self.color[at], self.color[at + 1]]));
+                }
+                if let Some(alpha) = &self.alpha {
+                    samples.push(u16::from_be_bytes([alpha[i * 2], alpha[i * 2 + 1]]));
+                }
+            }
+            Some(match (n, has_alpha) {
+                (1, false) => DynamicImage::ImageLuma16(ImageBuffer::<Luma<u16>, _>::from_raw(w, h, samples)?),
+                (1, true) => DynamicImage::ImageLumaA16(ImageBuffer::<LumaA<u16>, _>::from_raw(w, h, samples)?),
+                (_, false) => DynamicImage::ImageRgb16(ImageBuffer::<Rgb<u16>, _>::from_raw(w, h, samples)?),
+                (_, true) => DynamicImage::ImageRgba16(ImageBuffer::<Rgba<u16>, _>::from_raw(w, h, samples)?),
+            })
+        } else {
+            let mut samples = Vec::with_capacity((w * h) as usize * channels);
+            for i in 0..(w * h) as usize {
+                samples.extend_from_slice(&self.color[i * n..i * n + n]);
+                if let Some(alpha) = &self.alpha {
+                    samples.push(alpha[i]);
+                }
+            }
+            Some(match (n, has_alpha) {
+                (1, false) => DynamicImage::ImageLuma8(ImageBuffer::<Luma<u8>, _>::from_raw(w, h, samples)?),
+                (1, true) => DynamicImage::ImageLumaA8(ImageBuffer::<LumaA<u8>, _>::from_raw(w, h, samples)?),
+                (_, false) => DynamicImage::ImageRgb8(ImageBuffer::<Rgb<u8>, _>::from_raw(w, h, samples)?),
+                (_, true) => DynamicImage::ImageRgba8(ImageBuffer::<Rgba<u8>, _>::from_raw(w, h, samples)?),
+            })
+        }
+    }
+
+    /// Resample to `width × height`, keeping bit depth and ICC. `None` if it can't (CMYK).
+    pub fn resampled(&self, width: u32, height: u32) -> Option<DecodedImage> {
+        let image = self.to_dynamic()?.resize_exact(width, height, image::imageops::FilterType::Lanczos3);
+        let print = self.fingerprint ^ ((width as u128) << 64 | height as u128);
+        Some(from_dynamic(image, self.icc.as_deref().cloned(), print))
+    }
+}
+
 pub fn downscale(image: DynamicImage, max_px: u32) -> RgbaImage {
     let longest = image.width().max(image.height());
     if longest <= max_px {
