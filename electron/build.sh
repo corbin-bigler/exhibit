@@ -1,1 +1,0 @@
-npx electron-packager ./ Exhibit --all --overwrite --icon=build/icon.icns
