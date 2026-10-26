@@ -59,6 +59,16 @@ look are marked ★.
     Images below it, and all vectors, stay original.
 14. The **preview is always rasterised** from ≤1600 px proxies, so a 60-up of an 8K image costs
     the same as a 60-up of a small one.
+14a. ★ **The preview has its own pixel compositor** (`crates/data/src/composite.rs`). Each art is
+    rasterised once at slot size; every sheet pixel then looks up its art pixel directly, reflected
+    (Mirror) or clamped (Edge) using the same domain geometry as the export. Drawing the preview
+    through clip paths left hairlines at every trim and gutter: anti-aliasing at a clip edge leaks
+    whatever is underneath, and hayro can't isolate groups to avoid it.
+14b. **Export seam handling:** bleed is drawn for every item first, then all art on top; bleed
+    copies tuck 1 pt under the art (bleed shifts 0.7 mm, cut away anyway) and, between items, run
+    across the whole gutter under the neighbour. RIPs don't anti-alias, so print never had lines;
+    this keeps on-screen viewers like Acrobat close to clean too. A faint line may still appear in
+    a viewer where artwork's own edge sits on the trim — that's the viewer, not the file.
 
 ## Layout, bleed & marks
 

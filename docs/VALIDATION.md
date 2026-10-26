@@ -110,7 +110,8 @@ Run the automated checks with `cargo test --workspace`.
 
 | ID | Feature | Pass criteria | Method | Status |
 |---|---|---|---|---|
-| P-01 | Preview matches output | Preview is rendered by the export code, with proxies for raster art | integration (smoke) + manual | ✅ |
+| P-01 | Preview matches output | Preview uses the export's job geometry (same slots, bleed, marks), proxies for raster art | integration (smoke) + manual | ✅ |
+| P-07 | No seams in the preview | Mirror and Edge: every pixel along trims and gutters is art colour, none paper | preview example + pixel scan | ✅ |
 | P-02 | Sheet stepper | Steps 1..N, disabled at ends | manual | 🟡 |
 | P-03 | Fit zoom fills the preview area | Sheet scales with window | manual | ✅ |
 | P-04 | Sheet total in footer | Equals exported page count | integration | ✅ |

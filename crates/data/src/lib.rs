@@ -1,5 +1,6 @@
 //! Adapters behind the domain's ports: file decoding, PDF writing, previews, saving.
 
+mod composite;
 mod decode;
 mod library;
 mod render;

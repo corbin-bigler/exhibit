@@ -253,11 +253,10 @@ pub fn exif_orientation(bytes: &[u8]) -> u8 {
 /// applying EXIF orientation to the pixels. `hint` covers formats with no signature (TGA).
 pub fn decode_with_image_crate(bytes: &[u8], hint: Option<image::ImageFormat>) -> Result<DecodedImage, String> {
     let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?;
-    if reader.format().is_none() {
-        if let Some(format) = hint {
+    if reader.format().is_none()
+        && let Some(format) = hint {
             reader.set_format(format);
         }
-    }
     let mut decoder = reader.into_decoder().map_err(|e| e.to_string())?;
     let icc = decoder.icc_profile().ok().flatten();
     let orientation = decoder.orientation().ok();

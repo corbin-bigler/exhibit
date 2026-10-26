@@ -104,7 +104,7 @@ fn main() {
     if let Some(icc) = &icc {
         encoder.set_icc_profile(icc.clone()).unwrap();
     }
-    let raw: Vec<u8> = sticker.as_raw().iter().flat_map(|v| v.to_be_bytes()).collect();
+    let raw: Vec<u8> = sticker.as_raw().iter().flat_map(|v| v.to_ne_bytes()).collect();
     encoder.write_image(&raw, 1200, 1200, image::ExtendedColorType::Rgba16).unwrap();
     std::fs::write(dir.join("round-sticker-16bit-alpha.png"), png).unwrap();
 

@@ -44,7 +44,7 @@ impl Fixtures {
         if let Some(icc) = &self.icc {
             encoder.set_icc_profile(icc.clone()).unwrap();
         }
-        let raw: Vec<u8> = img.as_raw().iter().flat_map(|v| v.to_be_bytes()).collect();
+        let raw: Vec<u8> = img.as_raw().iter().flat_map(|v| v.to_ne_bytes()).collect();
         encoder.write_image(&raw, 64, 48, image::ExtendedColorType::Rgba16).unwrap();
         self.write("deep.png", &bytes)
     }

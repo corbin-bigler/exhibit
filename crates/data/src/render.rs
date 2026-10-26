@@ -1,5 +1,5 @@
-//! Drawing print jobs with krilla. The export and the on-screen preview share this code; the
-//! preview only swaps raster art for small proxies and rasterises the result with hayro.
+//! Drawing print jobs with krilla. The on-screen preview is composited in `composite.rs` from the
+//! same job geometry; each piece of art is rasterised here, with proxies standing in for big images.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -54,10 +54,7 @@ impl SheetRenderer for KrillaRenderer {
     }
 
     fn render_preview(&self, job: &PrintJob, sheet: usize, pixels_per_point: f64) -> Result<Bitmap, PortError> {
-        let empty = SheetJob::default();
-        let one = std::slice::from_ref(job.sheets.get(sheet).unwrap_or(&empty));
-        let bytes = write_pdf(&self.store, job, one, Quality::Proxy).map_err(PortError)?;
-        rasterize(bytes, pixels_per_point).map_err(PortError)
+        crate::composite::render_preview(&self.store, job, sheet, pixels_per_point).map_err(PortError)
     }
 }
 
@@ -92,9 +89,22 @@ fn draw_sheet(
     quality: Quality,
     cache: &DownsampleCache,
 ) -> Result<(), String> {
-    for placement in &sheet.placements {
-        let entry = store.get(placement.art_ref.source).ok_or("a file used on this sheet was removed")?;
-        draw_placement(surface, &entry, placement, quality, cache);
+    let entries = sheet
+        .placements
+        .iter()
+        .map(|p| store.get(p.art_ref.source).ok_or("a file used on this sheet was removed"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let art = |i: usize| {
+        let p = &sheet.placements[i];
+        Art { entry: &entries[i], page: p.art_ref.art.page, quality, limit: downsample_target(p, quality), cache: Some(cache) }
+    };
+    // Two passes so every trim edge is drawn over solid colour: all bleed first, then all art.
+    for (i, p) in sheet.placements.iter().enumerate() {
+        draw_bleed(surface, &art(i), p, touching_sides(&sheet.placements, i));
+    }
+    for (i, p) in sheet.placements.iter().enumerate() {
+        let clip = if p.bleed_mode == BleedMode::Scale { p.clip() } else { p.trim };
+        with_clip(surface, &clip, |s| art(i).draw_framed(s, &p.frame));
     }
     surface.set_fill(None);
     surface.set_stroke(Some(Stroke { width: MARK_WEIGHT as f32, ..Stroke::default() }));
@@ -112,22 +122,56 @@ fn draw_sheet(
     Ok(())
 }
 
-fn draw_placement(surface: &mut Surface, entry: &Entry, p: &Placement, quality: Quality, cache: &DownsampleCache) {
-    let art = Art { entry, page: p.art_ref.art.page, quality, limit: downsample_target(p, quality), cache: Some(cache) };
-    with_clip(surface, &p.clip(), |s| match p.bleed_mode {
-        BleedMode::Scale => art.draw_framed(s, &p.frame),
-        BleedMode::Mirror | BleedMode::Edge => {
-            with_clip(s, &p.trim, |s| art.draw_framed(s, &p.frame));
-            let sample = edge_sample(p);
-            for (strip, transform) in bleed_strips(p, sample) {
-                with_clip(s, &strip, |s| {
-                    s.push_transform(&transform);
-                    art.draw_framed(s, &p.frame);
-                    s.pop();
-                });
-            }
+/// Regions drawn separately overlap instead of meeting edge to edge, so anti-aliasing in viewers
+/// and previews never shows a hairline of paper between them. Bleed strips reach this far into
+/// their own trim, and where an item faces a neighbour its bleed runs across the whole gutter and
+/// this far under the neighbour's trim. The art, drawn afterwards, covers both; the gutter is cut away.
+const INNER_OVERLAP: f64 = 6.0;
+
+/// Bleed copies are tucked this far under the main art (Mirror reflects about a line this far
+/// inside the trim, Edge stretches to twice this past it), so on-screen viewers don't show a gap
+/// at the trim. Bleed content shifts by 2 pt (0.7 mm), which disappears when cut.
+const BLEED_TUCK: f64 = 1.0;
+
+/// Which sides of a placement's bleed meet a neighbour's bleed: (left, top, right, bottom).
+fn touching_sides(placements: &[Placement], index: usize) -> [bool; 4] {
+    let me = placements[index].clip();
+    let mut sides = [false; 4];
+    for (i, other) in placements.iter().enumerate() {
+        if i == index {
+            continue;
         }
-    });
+        let o = other.clip();
+        let near = |a: f64, b: f64| (a - b).abs() < 0.01;
+        if me.overlaps_vertically(&o) {
+            sides[0] |= near(me.x, o.right());
+            sides[2] |= near(me.right(), o.x);
+        }
+        if me.overlaps_horizontally(&o) {
+            sides[1] |= near(me.y, o.bottom());
+            sides[3] |= near(me.bottom(), o.y);
+        }
+    }
+    sides
+}
+
+/// How far bleed extends on a side: its own width, or across the gutter and under the
+/// neighbour's trim when it faces another item.
+fn bleed_reach(bleed: f64, touching: bool) -> f64 {
+    if touching { 2.0 * bleed + INNER_OVERLAP } else { bleed }
+}
+
+fn draw_bleed(surface: &mut Surface, art: &Art, p: &Placement, touching: [bool; 4]) {
+    if p.bleed_mode == BleedMode::Scale {
+        return;
+    }
+    for (strip, transform) in bleed_strips(p, edge_sample(p), touching, BLEED_TUCK) {
+        with_clip(surface, &strip, |s| {
+            s.push_transform(&transform);
+            art.draw_framed(s, &p.frame);
+            s.pop();
+        });
+    }
 }
 
 /// Pixel size to resample raster art to when it exceeds the export's resolution cap.
@@ -160,41 +204,52 @@ fn edge_sample(p: &Placement) -> Option<(f64, f64)> {
 
 /// The eight bleed regions around a trim box, each with the transform that fills it:
 /// a reflection (Mirror), or a stretch of the outermost sample of the art (Edge).
-fn bleed_strips(p: &Placement, edge_sample: Option<(f64, f64)>) -> Vec<(Rect, Transform)> {
+fn bleed_strips(
+    p: &Placement,
+    edge_sample: Option<(f64, f64)>,
+    touching: [bool; 4],
+    tuck: f64,
+) -> Vec<(Rect, Transform)> {
     let t = p.trim;
     let b = p.bleed;
     let (l, r, top, bottom) = (t.x, t.right(), t.y, t.bottom());
 
-    // Per-axis maps: (scale, translate) for x and y in each region.
+    // Per-axis maps: (scale, translate) for x and y in each region. Each copy is tucked
+    // `tuck` under the main art so no seam shows at the trim.
+    let d = tuck;
     let x_map = |side: i8| -> (f64, f64) {
         match (side, edge_sample) {
             (0, _) => (1.0, 0.0),
-            (-1, None) => (-1.0, 2.0 * l),
-            (_, None) => (-1.0, 2.0 * r),
+            (-1, None) => (-1.0, 2.0 * (l + d)),
+            (_, None) => (-1.0, 2.0 * (r - d)),
+            // Edge samples the strip one sample in from the edge: the outermost one is
+            // anti-aliased against the art's own boundary and would stretch into a pale band.
             (-1, Some((ex, _))) => {
-                let s = b.left / ex.min(t.width);
-                (s, l - b.left - l * s)
+                let ex = ex.min(t.width / 2.0);
+                let s = (b.left + 2.0 * d) / ex;
+                (s, l - b.left - (l + ex) * s)
             }
             (_, Some((ex, _))) => {
-                let ex = ex.min(t.width);
-                let s = b.right / ex;
-                (s, r + (ex - r) * s)
+                let ex = ex.min(t.width / 2.0);
+                let s = (b.right + 2.0 * d) / ex;
+                (s, r - 2.0 * d + (2.0 * ex - r) * s)
             }
         }
     };
     let y_map = |side: i8| -> (f64, f64) {
         match (side, edge_sample) {
             (0, _) => (1.0, 0.0),
-            (-1, None) => (-1.0, 2.0 * top),
-            (_, None) => (-1.0, 2.0 * bottom),
+            (-1, None) => (-1.0, 2.0 * (top + d)),
+            (_, None) => (-1.0, 2.0 * (bottom - d)),
             (-1, Some((_, ey))) => {
-                let s = b.top / ey.min(t.height);
-                (s, top - b.top - top * s)
+                let ey = ey.min(t.height / 2.0);
+                let s = (b.top + 2.0 * d) / ey;
+                (s, top - b.top - (top + ey) * s)
             }
             (_, Some((_, ey))) => {
-                let ey = ey.min(t.height);
-                let s = b.bottom / ey;
-                (s, bottom + (ey - bottom) * s)
+                let ey = ey.min(t.height / 2.0);
+                let s = (b.bottom + 2.0 * d) / ey;
+                (s, bottom - 2.0 * d + (2.0 * ey - bottom) * s)
             }
         }
     };
@@ -220,8 +275,17 @@ fn bleed_strips(p: &Placement, edge_sample: Option<(f64, f64)>) -> Vec<(Rect, Tr
             }
             let (ax, cx) = x_map(sx);
             let (ay, cy) = y_map(sy);
+            // Overlap neighbouring regions; an outer edge only grows where another item's bleed meets it.
+            let inner = |span: f64| INNER_OVERLAP.min(span);
+            let pad = |outer: bool, touch: bool, bleed: f64, span: f64| {
+                if outer { bleed_reach(bleed, touch) - bleed } else { inner(span) }
+            };
+            let pl = pad(sx == -1, touching[0], b.left, t.width);
+            let pr = pad(sx == 1, touching[2], b.right, t.width);
+            let pt = pad(sy == -1, touching[1], b.top, t.height);
+            let pb = pad(sy == 1, touching[3], b.bottom, t.height);
             strips.push((
-                Rect::new(x, y, w, h),
+                Rect::new(x - pl, y - pt, w + pl + pr, h + pt + pb),
                 Transform::from_row(ax as f32, 0.0, 0.0, ay as f32, cx as f32, cy as f32),
             ));
         }
@@ -349,11 +413,24 @@ fn line_path(line: &Line) -> Option<krilla::geom::Path> {
 pub(crate) fn thumbnail(entry: &Entry, page: usize, max_px: u32) -> Result<Bitmap, String> {
     let (w, h) = natural_size(entry, page).ok_or("page not found")?;
     let scale = max_px as f32 / w.max(h);
-    let (w, h) = ((w * scale).max(1.0), (h * scale).max(1.0));
+    render_art(entry, page, ((w * scale).round() as u32).max(1), ((h * scale).round() as u32).max(1), 0.0)
+}
+
+/// Rasterise one page of art, upright and unclipped, at exactly `width × height` pixels.
+/// `overscan` draws the art that many pixels larger on every side, so the outermost pixels are
+/// solid art rather than its anti-aliased edge (which bleed would mirror or stretch).
+pub(crate) fn render_art(entry: &Entry, page: usize, width: u32, height: u32, overscan: f32) -> Result<Bitmap, String> {
+    let (w, h) = (width as f32, height as f32);
     let mut document = Document::new();
     let mut pdf_page = document.start_page_with(PageSettings::from_wh(w, h).ok_or("empty art")?);
     let mut surface = pdf_page.surface();
-    Art { entry, page, quality: Quality::Proxy, limit: None, cache: None }.draw_natural(&mut surface, w, h);
+    surface.push_transform(&Transform::from_translate(-overscan, -overscan));
+    Art { entry, page, quality: Quality::Proxy, limit: None, cache: None }.draw_natural(
+        &mut surface,
+        w + 2.0 * overscan,
+        h + 2.0 * overscan,
+    );
+    surface.pop();
     surface.finish();
     pdf_page.finish();
     rasterize(document.finish().map_err(|e| e.to_string())?, 1.0)
