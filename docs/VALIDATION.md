@@ -17,11 +17,11 @@ Run the automated checks with `cargo test --workspace`.
 |---|---|---|---|---|
 | IMP-01 | JPEG (`.jpg .jpeg .jfif .pjpeg .pjp`) | Imports; pixel size + ICC read | integration | ✅ |
 | IMP-02 | PNG (incl. 16-bit, alpha, iCCP) | Imports; bit depth and ICC preserved | integration | ✅ |
-| IMP-03 | WebP (lossy + lossless) | Imports | integration | 🟡 no fixture yet |
-| IMP-04 | GIF (first frame) | Imports | integration | 🟡 no fixture yet |
-| IMP-05 | BMP | Imports | integration | 🟡 no fixture yet |
+| IMP-03 | WebP (lossy + lossless) | Imports | fixtures + impose | ✅ lossless · 🟡 lossy |
+| IMP-04 | GIF (first frame) | Imports | fixtures + impose | ✅ |
+| IMP-05 | BMP | Imports | fixtures + impose | ✅ |
 | IMP-06 | TIFF (8/16-bit RGB, gray; ICC) | Imports; ICC preserved | integration | ✅ |
-| IMP-07 | TGA, QOI, PNM | Imports | integration | 🟡 no fixture yet |
+| IMP-07 | TGA, QOI, PNM | Imports (TGA has no signature: falls back to the extension) | fixtures + impose | ✅ |
 | IMP-08 | JPEG XL | Imports; ICC preserved | integration | 🟡 no fixture yet |
 | IMP-09 | HEIC / HEIF | Imports at full resolution; ICC preserved | manual (needs Windows HEIF+HEVC extensions) | 🟡 |
 | IMP-10 | AVIF | Imports at full resolution; ICC preserved | manual (needs Windows AV1 extension) | 🟡 |

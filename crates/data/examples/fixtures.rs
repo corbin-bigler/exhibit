@@ -76,6 +76,58 @@ fn main() {
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><circle cx="150" cy="150" r="140" fill="#ED1C24"/><path d="M60 210 L120 110 L150 150 L190 80 L245 210 Z" fill="#fff"/></svg>"##,
     )
     .unwrap();
+
+    // One small picture in every other raster format the app reads.
+    let card = ImageBuffer::from_fn(900, 1260, |x, y| {
+        let band = (y / 140) as u8;
+        Rgb([200u8.wrapping_sub(band * 15), (x / 4) as u8, 90 + band * 12])
+    });
+    let save = |name: &str, format: image::ImageFormat| {
+        image::DynamicImage::ImageRgb8(card.clone()).save_with_format(dir.join(name), format).unwrap();
+    };
+    save("menu-front.png", image::ImageFormat::Png);
+    save("menu-front.webp", image::ImageFormat::WebP);
+    save("menu-front.gif", image::ImageFormat::Gif);
+    save("menu-front.bmp", image::ImageFormat::Bmp);
+    save("menu-front.tga", image::ImageFormat::Tga);
+    save("menu-front.qoi", image::ImageFormat::Qoi);
+    save("menu-front.ppm", image::ImageFormat::Pnm);
+
+    // 16-bit PNG with transparency and an ICC profile.
+    let sticker: ImageBuffer<image::Rgba<u16>, Vec<u16>> = ImageBuffer::from_fn(1200, 1200, |x, y| {
+        let (dx, dy) = (x as f32 - 600.0, y as f32 - 600.0);
+        let inside = dx * dx + dy * dy < 560.0 * 560.0;
+        image::Rgba([60000, (x * 40) as u16, (y * 30) as u16, if inside { 65535 } else { 0 }])
+    });
+    let mut png = Vec::new();
+    let mut encoder = image::codecs::png::PngEncoder::new(&mut png);
+    if let Some(icc) = &icc {
+        encoder.set_icc_profile(icc.clone()).unwrap();
+    }
+    let raw: Vec<u8> = sticker.as_raw().iter().flat_map(|v| v.to_be_bytes()).collect();
+    encoder.write_image(&raw, 1200, 1200, image::ExtendedColorType::Rgba16).unwrap();
+    std::fs::write(dir.join("round-sticker-16bit-alpha.png"), png).unwrap();
+
+    // 8K photo-sized JPEG: switch to By grid 6 × 10 to trigger the heavy-sheet warning.
+    let huge = ImageBuffer::from_fn(7680, 4320, |x, y| Rgb([(x / 30) as u8, (y / 17) as u8, ((x + y) / 48) as u8]));
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85)
+        .write_image(huge.as_raw(), 7680, 4320, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    std::fs::write(dir.join("huge-8k-photo.jpg"), jpeg).unwrap();
+
+    // Low-resolution JPEG: shows the amber DPI badge at 5 × 7.
+    let small = ImageBuffer::from_fn(500, 700, |x, y| Rgb([(x / 2) as u8, 160, (y / 3) as u8]));
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90)
+        .write_image(small.as_raw(), 500, 700, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    std::fs::write(dir.join("low-res-flyer.jpg"), jpeg).unwrap();
+
+    // Not artwork, and a broken file: both should be reported without blocking the rest.
+    std::fs::write(dir.join("notes.txt"), "not artwork").unwrap();
+    std::fs::write(dir.join("broken.png"), b"this is not really a png").unwrap();
+
     println!("wrote fixtures to {}", dir.display());
 }
 

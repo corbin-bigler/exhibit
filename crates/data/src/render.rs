@@ -247,7 +247,7 @@ impl Art<'_> {
             .or_insert_with(|| {
                 let full = match &self.entry.content {
                     // Decoding applies EXIF orientation, so the result is drawn upright.
-                    Content::Embedded { bytes, .. } => crate::decode::decode_with_image_crate(bytes).ok()?,
+                    Content::Embedded { bytes, .. } => crate::decode::decode_with_image_crate(bytes, None).ok()?,
                     Content::Decoded(decoded) => decoded.clone(),
                     Content::Pdf { .. } | Content::Svg(_) => return None,
                 };

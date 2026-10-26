@@ -146,7 +146,8 @@ fn load(path: &Path, format: SourceFormat, bytes: Vec<u8>) -> Result<(Content, V
             (Content::Embedded { image, bytes, exif_orientation: 1 }, raster(w, h))
         }
         SourceFormat::Bmp | SourceFormat::Tiff | SourceFormat::Tga | SourceFormat::Qoi | SourceFormat::Pnm => {
-            decoded(decode::decode_with_image_crate(&bytes)?)
+            let hint = (format == SourceFormat::Tga).then_some(image::ImageFormat::Tga);
+            decoded(decode::decode_with_image_crate(&bytes, hint)?)
         }
         SourceFormat::JpegXl => decoded(decode::decode_jxl(&bytes)?),
         SourceFormat::Heif | SourceFormat::Avif => {
