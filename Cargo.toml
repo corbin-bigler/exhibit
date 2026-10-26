@@ -1,0 +1,13 @@
+[workspace]
+resolver = "3"
+members = ["crates/domain", "crates/data", "app"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "UNLICENSED"
+publish = false
+
+# Image decoding and PDF writing are unusably slow unoptimised, even while developing.
+[profile.dev.package."*"]
+opt-level = 2
