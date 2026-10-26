@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::items::{ItemId, SourceId};
+use crate::items::{ImportedSource, ItemId, SourceId};
 use crate::job::{HeavySheet, PrintJob, build_print_job, heavy_sheets};
 use crate::layout::{SlotLayout, layout_slots};
 use crate::ports::{Bitmap, DocumentSink, ExportOptions, PortError, SheetRenderer, SourceLibrary};
@@ -20,21 +20,42 @@ pub struct ImportReport {
     pub failed: Vec<(PathBuf, PortError)>,
 }
 
+/// Files opened but not yet in the workspace.
+#[derive(Debug, Default)]
+pub struct OpenedFiles {
+    sources: Vec<ImportedSource>,
+    failed: Vec<(PathBuf, PortError)>,
+}
+
 impl ImportFiles {
     /// Files that fail don't stop the rest; each failure is reported with its path.
     pub fn execute(&self, workspace: &mut Workspace, paths: &[PathBuf]) -> ImportReport {
-        let mut report = ImportReport::default();
+        let opened = self.open(paths);
+        self.add(workspace, opened)
+    }
+
+    /// The slow half: decoding. Needs no access to the workspace.
+    pub fn open(&self, paths: &[PathBuf]) -> OpenedFiles {
+        let mut opened = OpenedFiles::default();
         for path in paths {
             match self.library.open(path) {
                 Ok(source) if source.pages.is_empty() => {
                     self.library.release(source.id);
-                    report.failed.push((path.clone(), PortError("the file has no pages".into())));
+                    opened.failed.push((path.clone(), PortError("the file has no pages".into())));
                 }
-                Ok(source) => report.added.push(workspace.add(source)),
-                Err(error) => report.failed.push((path.clone(), error)),
+                Ok(source) => opened.sources.push(source),
+                Err(error) => opened.failed.push((path.clone(), error)),
             }
         }
-        report
+        opened
+    }
+
+    /// The fast half: appending to the list.
+    pub fn add(&self, workspace: &mut Workspace, opened: OpenedFiles) -> ImportReport {
+        ImportReport {
+            added: opened.sources.into_iter().map(|source| workspace.add(source)).collect(),
+            failed: opened.failed,
+        }
     }
 }
 
@@ -110,16 +131,14 @@ impl UpdateSettings {
         if !finite(s.sheet.margin) || s.sheet.margin < 0.0 || 2.0 * s.sheet.margin >= s.sheet.width.min(s.sheet.height) {
             return Err(InvalidSettings("margin must leave room on the sheet"));
         }
-        if let LayoutMode::BySize { item, .. } = s.layout {
-            if !(finite(item.width) && item.width > 0.0 && finite(item.height) && item.height > 0.0) {
+        if let LayoutMode::BySize { item, .. } = s.layout
+            && !(finite(item.width) && item.width > 0.0 && finite(item.height) && item.height > 0.0) {
                 return Err(InvalidSettings("item size must be positive"));
             }
-        }
-        if let LayoutMode::ByGrid { across, down } = s.layout {
-            if across == 0 || down == 0 {
+        if let LayoutMode::ByGrid { across, down } = s.layout
+            && (across == 0 || down == 0) {
                 return Err(InvalidSettings("grid needs at least one row and column"));
             }
-        }
         for v in [s.gutter, s.bleed.width, s.marks.crop.length, s.marks.crop.offset] {
             if !finite(v) || v < 0.0 {
                 return Err(InvalidSettings("lengths can't be negative"));

@@ -168,7 +168,7 @@ fn pdf_pages_stay_vector_and_are_embedded_once() {
     assert_eq!(count(&pdf, b"/Subtype /Image"), 0, "no raster images for vector input");
     // Two PDF pages, each drawn 4 copies × 9 times (main + 8 bleed regions): still one XObject per page.
     let forms = count(&pdf, b"/Subtype /Form");
-    assert!(forms >= 2 && forms <= 4, "expected one form per source page, found {forms}");
+    assert!((2..=4).contains(&forms), "expected one form per source page, found {forms}");
     assert_eq!(page_count(&pdf), build_print_job(&ws).sheets.len());
     assert_eq!(page_count(&pdf), 3);
 }
@@ -180,7 +180,7 @@ fn jpeg_bytes_are_embedded_untouched() {
     let (_, renderer, import) = setup();
     let mut ws = Workspace::default();
     let path = fx.jpeg();
-    let report = import.execute(&mut ws, &[path.clone()]);
+    let report = import.execute(&mut ws, std::slice::from_ref(&path));
     let pdf = export_only(&mut ws, &renderer, &report.added);
     let source = std::fs::read(&path).unwrap();
     assert_eq!(count(&pdf, b"/DCTDecode"), 1, "one JPEG stream for all four copies");

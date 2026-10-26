@@ -1,0 +1,18 @@
+[package]
+name = "exhibit"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+exhibit-domain = { path = "../crates/domain" }
+exhibit-data = { path = "../crates/data" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"

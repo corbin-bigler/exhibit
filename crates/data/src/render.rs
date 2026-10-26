@@ -276,12 +276,11 @@ impl Art<'_> {
             surface.draw_image(image, size);
             return;
         }
-        if self.quality == Quality::Proxy {
-            if let Some(proxy) = self.entry.proxy() {
+        if self.quality == Quality::Proxy
+            && let Some(proxy) = self.entry.proxy() {
                 surface.draw_image(proxy, size);
                 return;
             }
-        }
         match &self.entry.content {
             Content::Pdf { document, .. } => surface.draw_pdf_page(document, size, self.page),
             Content::Svg(tree) => {

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Steamroller Exhibit</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="titlebar" data-tauri-drag-region>
+    <img class="brand" src="assets/steamroller-logo.webp" alt="Steamroller" data-tauri-drag-region />
+    <div class="window-controls">
+      <button class="wc" id="wc-min" aria-label="Minimize"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor"/></svg></button>
+      <button class="wc" id="wc-max" aria-label="Maximize"><svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor"/></svg></button>
+      <button class="wc close" id="wc-close" aria-label="Close"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M.5.5l9 9M9.5.5l-9 9" stroke="currentColor"/></svg></button>
+    </div>
+  </header>
+
+  <main class="body">
+    <aside class="settings">
+      <section class="section">
+        <div class="section-head">
+          <h2>Sheet</h2>
+          <div class="segmented small" id="units">
+            <button data-value="in">in</button><button data-value="mm">mm</button>
+          </div>
+        </div>
+        <label class="select">
+          <select id="preset"></select>
+          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="#555" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </label>
+        <div class="row">
+          <label class="field"><span>Width</span><input id="sheet-width" inputmode="decimal" /></label>
+          <label class="field"><span>Height</span><input id="sheet-height" inputmode="decimal" /></label>
+          <label class="field"><span>Margin</span><input id="margin" inputmode="decimal" /></label>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Layout</h2>
+          <div class="segmented small" id="mode">
+            <button data-value="size">By size</button><button data-value="grid">By grid</button>
+          </div>
+        </div>
+        <div class="row" id="size-row">
+          <label class="field"><span>Item width</span><input id="item-width" inputmode="decimal" /></label>
+          <span class="times">×</span>
+          <label class="field"><span>Item height</span><input id="item-height" inputmode="decimal" /></label>
+        </div>
+        <div class="row" id="grid-row">
+          <label class="field"><span>Across</span><input id="across" inputmode="numeric" /></label>
+          <span class="times">×</span>
+          <label class="field"><span>Down</span><input id="down" inputmode="numeric" /></label>
+        </div>
+        <div class="row">
+          <label class="field narrow"><span>Gutter</span><input id="gutter" inputmode="decimal" /></label>
+          <div class="field grow">
+            <span>Scaling</span>
+            <div class="segmented" id="scaling"><button data-value="fill">Fill</button><button data-value="fit">Fit</button></div>
+          </div>
+        </div>
+        <div class="toggle-row" id="mix-row">
+          <span>Mix orientations</span>
+          <button class="switch" id="mix" role="switch" aria-checked="false"><span></span></button>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Bleed</h2>
+          <input class="compact" id="bleed-width" inputmode="decimal" aria-label="Bleed width" />
+        </div>
+        <div class="tiles" id="bleed-mode">
+          <button data-value="mirror">
+            <svg width="40" height="28" viewBox="0 0 40 28"><rect x="1" y="1" width="38" height="26" rx="2" fill="currentColor" opacity=".3"/><rect x="7" y="5" width="26" height="18" fill="currentColor"/><path d="M20 3v22" stroke="#fff" stroke-dasharray="2 2"/></svg>
+            <span>Mirror</span>
+          </button>
+          <button data-value="edge">
+            <svg width="40" height="28" viewBox="0 0 40 28"><rect x="1" y="1" width="38" height="26" rx="2" fill="currentColor" opacity=".2"/><path d="M1 5h6M1 9h6M1 13h6M1 17h6M1 21h6M33 5h6M33 9h6M33 13h6M33 17h6M33 21h6" stroke="currentColor" opacity=".5"/><rect x="7" y="5" width="26" height="18" fill="currentColor"/></svg>
+            <span>Edge</span>
+          </button>
+          <button data-value="scale">
+            <svg width="40" height="28" viewBox="0 0 40 28"><rect x="1" y="1" width="38" height="26" rx="2" fill="currentColor"/><rect x="7" y="5" width="26" height="18" fill="none" stroke="#fff" stroke-dasharray="2 2"/></svg>
+            <span>Scale</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="section last">
+        <h2>Marks</h2>
+        <div class="toggle-row">
+          <span>Crop marks</span>
+          <button class="switch" id="crop-marks" role="switch" aria-checked="true"><span></span></button>
+        </div>
+        <div class="row">
+          <label class="field"><span>Length</span><input id="mark-length" inputmode="decimal" /></label>
+          <label class="field"><span>Offset</span><input id="mark-offset" inputmode="decimal" /></label>
+        </div>
+        <div class="toggle-row">
+          <span>Trim lines</span>
+          <button class="switch" id="trim-lines" role="switch" aria-checked="false"><span></span></button>
+        </div>
+      </section>
+    </aside>
+
+    <section class="preview">
+      <div class="preview-toolbar">
+        <div class="stepper">
+          <button id="prev-sheet" aria-label="Previous sheet"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M7.5 3l-3 3 3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <span id="sheet-label">No sheets</span>
+          <button id="next-sheet" aria-label="Next sheet"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M4.5 3l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+        <div class="zoom" id="zoom-label">Fit</div>
+      </div>
+      <div class="stage" id="stage">
+        <div class="sheet" id="sheet">
+          <canvas id="sheet-canvas"></canvas>
+          <svg id="slot-overlay" class="slot-overlay"></svg>
+        </div>
+      </div>
+    </section>
+
+    <aside class="files">
+      <div class="files-head">
+        <h2>Files <span id="item-count"></span></h2>
+        <div class="files-actions">
+          <button class="text-button" id="clear-all">Clear all</button>
+          <button class="tint-button" id="add-files">
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            Add files
+          </button>
+        </div>
+      </div>
+      <ol class="file-list" id="file-list"></ol>
+      <button class="drop-zone" id="drop-zone">
+        <span class="drop-icon"><svg width="22" height="22" viewBox="0 0 22 22"><path d="M11 15V4M6.5 8.5L11 4l4.5 4.5M4 18h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span class="drop-title">Drop artwork here</span>
+      </button>
+      <div class="export">
+        <div class="sheet-total"><strong id="sheet-total">0</strong> <span id="sheet-word">sheets</span></div>
+        <button class="primary" id="export">
+          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1.5v8M3.5 6L7 9.5 10.5 6M2 12.5h10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Export PDF
+        </button>
+      </div>
+    </aside>
+  </main>
+
+  <div class="drop-veil" id="drop-veil"><span>Drop to add</span></div>
+
+  <dialog id="heavy-dialog">
+    <form method="dialog">
+      <h2>Heavy sheets</h2>
+      <ul id="heavy-list"></ul>
+      <label class="field inline"><span>Downsample to</span><input id="cap-dpi" inputmode="numeric" value="300" /><span>dpi</span></label>
+      <div class="dialog-actions">
+        <button value="cancel" class="text-button">Cancel</button>
+        <button value="anyway" class="secondary">Export anyway</button>
+        <button value="cap" class="primary">Downsample</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>
