@@ -28,11 +28,23 @@ pub(crate) enum Content {
 pub(crate) struct Entry {
     pub content: Content,
     proxy: OnceLock<Option<Image>>,
+    print: OnceLock<Option<Image>>,
 }
 
 impl Entry {
     fn new(content: Content) -> Self {
-        Self { content, proxy: OnceLock::new() }
+        Self { content, proxy: OnceLock::new(), print: OnceLock::new() }
+    }
+
+    /// Decoded pixels as one PDF image, built once: every copy and bleed piece reuses it.
+    /// Building a fresh image per draw recompressed the pixels each time. `None` for other content.
+    pub fn print_image(&self) -> Option<Image> {
+        self.print
+            .get_or_init(|| match &self.content {
+                Content::Decoded(decoded) => Image::from_custom(decoded.clone(), false).ok(),
+                _ => None,
+            })
+            .clone()
     }
 
     /// A small 8-bit stand-in for raster art, so previews stay fast. `None` for vector art.
@@ -154,7 +166,7 @@ fn load(format: SourceFormat, bytes: Vec<u8>) -> Result<(Content, Vec<PageArt>),
             }
             #[cfg(not(windows))]
             {
-                return Err("HEIC and AVIF need Windows".into());
+                return Err("HEIC and AVIF can only be opened in the Windows app for now".into());
             }
         }
     })

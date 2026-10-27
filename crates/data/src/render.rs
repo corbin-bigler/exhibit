@@ -355,8 +355,8 @@ impl Art<'_> {
             Content::Embedded { image, exif_orientation, .. } => {
                 draw_oriented(surface, image.clone(), *exif_orientation, w, h)
             }
-            Content::Decoded(decoded) => {
-                if let Ok(image) = Image::from_custom(decoded.clone(), false) {
+            Content::Decoded(_) => {
+                if let Some(image) = self.entry.print_image() {
                     surface.draw_image(image, size);
                 }
             }
