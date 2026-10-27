@@ -26,6 +26,18 @@ look are marked ★.
 4. **No frontend build step.** Plain HTML/CSS/JS in `app/ui`, no npm. Easy to move to a framework
    later if the UI grows.
 5. **Fonts bundled** (Poppins 400–700, Archivo Black; OFL licensed) so the app works offline.
+6a. ★ **Web build (reverses "Windows 11 only").** Exhibit also targets the browser via wasm, on
+   branch `web`. To make that possible:
+   - **Ports take bytes, not paths.** `SourceLibrary::open(SourceFile { name, bytes })`; the format
+     comes from the name's extension. Each interface reads files its own way: the Tauri commands
+     use `std::fs`, the web will use JS `File`s. The domain has no file-system or path code.
+   - **The document sink is bound to its target** (`FileSink::new(path)`, created after Save As).
+     `DocumentSink::write(bytes)` has no path. The web will collect the bytes in memory and save
+     them from JS, because browsers only allow the save picker straight after a click, before
+     rendering.
+   - **SVGs that link images by file path lose them** (there's no folder to resolve against).
+     Embedded `data:` images, the usual case for print, are unaffected.
+   - **WIC decodes from memory** (`IWICStream`), not a file name.
 6. **Custom title bar** (`decorations: false`) to match the design. Downside: Windows 11's
    snap-layout flyout on the maximise button is lost. Can be restored with a plugin or by going
    back to the native title bar.
@@ -108,6 +120,7 @@ look are marked ★.
 
 - `ARCHITECTURE.md` and `CLAUDE.md` were missing from the main checkout when I went to commit
   them, so they're not on this branch. I still have their contents if you want them restored.
-- No real HEIC/AVIF/CMYK/JXL sample files were tested — see `docs/VALIDATION.md` for what's
+- HEIC was tested only with a file WIC itself encoded; no real phone photo, AVIF, CMYK or JXL
+  samples yet — see `docs/VALIDATION.md` for what's
   still 🟡.
 - Installer (`cargo tauri build` → NSIS) isn't set up yet; it needs `tauri-cli` installed.

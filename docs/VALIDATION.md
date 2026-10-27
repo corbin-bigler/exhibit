@@ -23,7 +23,7 @@ Run the automated checks with `cargo test --workspace`.
 | IMP-06 | TIFF (8/16-bit RGB, gray; ICC) | Imports; ICC preserved | integration | ✅ |
 | IMP-07 | TGA, QOI, PNM | Imports (TGA has no signature: falls back to the extension) | fixtures + impose | ✅ |
 | IMP-08 | JPEG XL | Imports; ICC preserved | integration | 🟡 no fixture yet |
-| IMP-09 | HEIC / HEIF | Imports at full resolution; ICC preserved | manual (needs Windows HEIF+HEVC extensions) | 🟡 |
+| IMP-09 | HEIC / HEIF | Imports at full resolution; ICC preserved | manual (needs Windows HEIF+HEVC extensions) | ✅ WIC-encoded sample · 🟡 phone photo, ICC |
 | IMP-10 | AVIF | Imports at full resolution; ICC preserved | manual (needs Windows AV1 extension) | 🟡 |
 | IMP-11 | SVG | Imports as vector | integration | ✅ |
 | IMP-12 | PDF (multi-page) | Imports as one pack with N pages | integration | ✅ |
@@ -31,7 +31,7 @@ Run the automated checks with `cargo test --workspace`.
 | IMP-14 | Add via button (multi-select dialog) | Files appear in list, order preserved | manual | 🟡 |
 | IMP-15 | Add via drag & drop onto window | Files appear in list | manual | 🟡 |
 | IMP-16 | EXIF orientation | Phone portrait JPEG shows upright; JPEG bytes still untouched | manual | ✅ JPEG · 🟡 HEIC |
-| IMP-17 | Files passed on the command line open at launch | Items listed on start | manual | ✅ |
+| IMP-17 | Files passed on the command line open at launch | Items listed on start (incl. HEIC, which used to crash drag-and-drop setup) | manual | ✅ |
 
 ## 2. Output quality (the core promise)
 
