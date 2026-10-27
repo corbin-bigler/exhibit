@@ -153,7 +153,7 @@ fn load(path: &Path, format: SourceFormat, bytes: Vec<u8>) -> Result<(Content, V
         SourceFormat::Heif | SourceFormat::Avif => {
             #[cfg(windows)]
             {
-                decoded(crate::wic::decode(path, &bytes)?)
+                decoded(crate::wic::decode(&bytes)?)
             }
             #[cfg(not(windows))]
             {

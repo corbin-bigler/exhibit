@@ -4,21 +4,18 @@
 //! "AV1 Video Extension" (AVIF). Most Windows 11 machines have them; without them WIC
 //! reports that no decoder was found and the import fails with that message.
 
-use std::path::Path;
-
-use windows::Win32::Foundation::GENERIC_READ;
 use windows::Win32::Graphics::Imaging::{
     CLSID_WICImagingFactory, GUID_WICPixelFormat32bppRGBA, GUID_WICPixelFormat64bppRGBA, IWICColorContext,
     IWICImagingFactory, IWICPixelFormatInfo, WICColorContextProfile, WICConvertBitmapSource,
     WICDecodeMetadataCacheOnDemand,
 };
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
-use windows::core::{HSTRING, Interface};
+use windows::core::Interface;
 
 use crate::decode::{DecodedImage, fingerprint};
 
-pub fn decode(path: &Path, file_bytes: &[u8]) -> Result<DecodedImage, String> {
-    unsafe { decode_unsafe(path, file_bytes) }.map_err(|e| {
+pub fn decode(file_bytes: &[u8]) -> Result<DecodedImage, String> {
+    unsafe { decode_unsafe(file_bytes) }.map_err(|e| {
         if e.code().0 as u32 == 0x88982F50 {
             "Windows has no decoder for this format. Install HEIF Image Extensions and HEVC Video \
              Extensions (HEIC) or AV1 Video Extension (AVIF) from the Microsoft Store."
@@ -29,17 +26,15 @@ pub fn decode(path: &Path, file_bytes: &[u8]) -> Result<DecodedImage, String> {
     })
 }
 
-unsafe fn decode_unsafe(path: &Path, file_bytes: &[u8]) -> windows::core::Result<DecodedImage> {
+unsafe fn decode_unsafe(file_bytes: &[u8]) -> windows::core::Result<DecodedImage> {
     unsafe {
         // Already initialised on this thread is fine; a different apartment is fine for WIC too.
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let factory: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-        let decoder = factory.CreateDecoderFromFilename(
-            &HSTRING::from(path.as_os_str()),
-            None,
-            GENERIC_READ,
-            WICDecodeMetadataCacheOnDemand,
-        )?;
+        // The stream reads straight from `file_bytes`, which outlives the decoder.
+        let stream = factory.CreateStream()?;
+        stream.InitializeFromMemory(file_bytes)?;
+        let decoder = factory.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)?;
         let frame = decoder.GetFrame(0)?;
         let (mut width, mut height) = (0u32, 0u32);
         frame.GetSize(&mut width, &mut height)?;
