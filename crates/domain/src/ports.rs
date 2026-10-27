@@ -1,7 +1,5 @@
 //! What the domain needs from the outside world. Implemented in `exhibit-data`.
 
-use std::path::Path;
-
 use crate::items::{ImportedSource, SourceId};
 use crate::job::PrintJob;
 
@@ -16,9 +14,16 @@ impl std::fmt::Display for PortError {
 
 impl std::error::Error for PortError {}
 
+/// An artwork file as it arrived: its name (gives the format and labels errors) and contents.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceFile {
+    pub name: String,
+    pub bytes: Vec<u8>,
+}
+
 /// Opens artwork files and keeps them available for drawing.
 pub trait SourceLibrary: Send + Sync {
-    fn open(&self, path: &Path) -> Result<ImportedSource, PortError>;
+    fn open(&self, file: SourceFile) -> Result<ImportedSource, PortError>;
     fn release(&self, source: SourceId);
     /// A small RGBA preview of one page, longest side at most `max_px`.
     fn thumbnail(&self, source: SourceId, page: usize, max_px: u32) -> Result<Bitmap, PortError>;
@@ -38,9 +43,9 @@ pub trait SheetRenderer: Send + Sync {
     fn render_preview(&self, job: &PrintJob, sheet: usize, pixels_per_point: f64) -> Result<Bitmap, PortError>;
 }
 
-/// Writes finished files.
+/// Writes a finished file. Each sink already knows its destination.
 pub trait DocumentSink: Send + Sync {
-    fn write(&self, path: &Path, bytes: &[u8]) -> Result<(), PortError>;
+    fn write(&self, bytes: &[u8]) -> Result<(), PortError>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

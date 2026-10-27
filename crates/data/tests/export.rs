@@ -6,7 +6,7 @@ use std::sync::Arc;
 use exhibit_data::{FileSink, KrillaRenderer, SourceStore};
 use exhibit_domain::items::{ArtKind, ItemId};
 use exhibit_domain::job::build_print_job;
-use exhibit_domain::ports::{ExportOptions, SheetRenderer, SourceLibrary};
+use exhibit_domain::ports::{ExportOptions, SheetRenderer, SourceFile, SourceLibrary};
 use exhibit_domain::usecases::{ExportPdf, ImportFiles};
 use exhibit_domain::workspace::Workspace;
 use image::{ImageBuffer, ImageEncoder, Rgb, Rgba};
@@ -103,6 +103,14 @@ impl Drop for Fixtures {
     }
 }
 
+/// Reads fixture files the way the app does before importing them.
+fn files(paths: &[PathBuf]) -> Vec<SourceFile> {
+    paths
+        .iter()
+        .map(|p| SourceFile { name: p.file_name().unwrap().to_string_lossy().into_owned(), bytes: std::fs::read(p).unwrap() })
+        .collect()
+}
+
 fn setup() -> (Arc<SourceStore>, KrillaRenderer, ImportFiles) {
     let store = Arc::new(SourceStore::default());
     let renderer = KrillaRenderer::new(store.clone());
@@ -144,7 +152,7 @@ fn imports_every_fixture_format_and_reports_bad_files() {
     let bad = fx.write("broken.png", b"not a png at all");
     let unknown = fx.write("notes.txt", b"hello");
     let paths = vec![fx.jpeg(), fx.png16_alpha(), fx.tiff16(), fx.svg(), fx.pdf(), bad, unknown];
-    let report = import.execute(&mut ws, &paths);
+    let report = import.execute(&mut ws, files(&paths));
     assert_eq!(report.added.len(), 5, "failures: {:?}", report.failed);
     assert_eq!(report.failed.len(), 2);
     assert!(report.failed.iter().any(|(_, e)| e.0.starts_with("broken.png")));
@@ -163,7 +171,7 @@ fn pdf_pages_stay_vector_and_are_embedded_once() {
     let fx = Fixtures::new("vector");
     let (_, renderer, import) = setup();
     let mut ws = Workspace::default();
-    let report = import.execute(&mut ws, &[fx.pdf(), fx.svg()]);
+    let report = import.execute(&mut ws, files(&[fx.pdf(), fx.svg()]));
     let pdf = export_only(&mut ws, &renderer, &report.added);
     assert_eq!(count(&pdf, b"/Subtype /Image"), 0, "no raster images for vector input");
     // Two PDF pages, each drawn 4 copies × 9 times (main + 8 bleed regions): still one XObject per page.
@@ -180,7 +188,7 @@ fn jpeg_bytes_are_embedded_untouched() {
     let (_, renderer, import) = setup();
     let mut ws = Workspace::default();
     let path = fx.jpeg();
-    let report = import.execute(&mut ws, std::slice::from_ref(&path));
+    let report = import.execute(&mut ws, files(std::slice::from_ref(&path)));
     let pdf = export_only(&mut ws, &renderer, &report.added);
     let source = std::fs::read(&path).unwrap();
     assert_eq!(count(&pdf, b"/DCTDecode"), 1, "one JPEG stream for all four copies");
@@ -194,7 +202,7 @@ fn deep_images_keep_bit_depth_alpha_and_icc() {
     let fx = Fixtures::new("deep");
     let (_, renderer, import) = setup();
     let mut ws = Workspace::default();
-    let report = import.execute(&mut ws, &[fx.png16_alpha(), fx.tiff16()]);
+    let report = import.execute(&mut ws, files(&[fx.png16_alpha(), fx.tiff16()]));
     let pdf = export_only(&mut ws, &renderer, &report.added);
     assert!(count(&pdf, b"/BitsPerComponent 16") >= 2, "16-bit colour kept");
     assert!(count(&pdf, b"/SMask") >= 1, "alpha kept");
@@ -210,7 +218,7 @@ fn previews_and_thumbnails_render() {
     let fx = Fixtures::new("preview");
     let (store, renderer, import) = setup();
     let mut ws = Workspace::default();
-    import.execute(&mut ws, &[fx.jpeg(), fx.svg(), fx.pdf(), fx.tiff16()]);
+    import.execute(&mut ws, files(&[fx.jpeg(), fx.svg(), fx.pdf(), fx.tiff16()]));
     let job = build_print_job(&ws);
     let preview = renderer.render_preview(&job, 0, 0.5).unwrap();
     assert_eq!((preview.width, preview.height), (432, 648));
@@ -227,10 +235,10 @@ fn export_writes_the_file() {
     let fx = Fixtures::new("export");
     let (store, renderer, import) = setup();
     let mut ws = Workspace::default();
-    import.execute(&mut ws, &[fx.pdf()]);
-    let export = ExportPdf { renderer: Arc::new(renderer), sink: Arc::new(FileSink) };
+    import.execute(&mut ws, files(&[fx.pdf()]));
     let out = fx.dir.join("out.pdf");
-    assert_eq!(export.execute(&ws, &out, &ExportOptions::default()).unwrap(), 2);
+    let export = ExportPdf { renderer: Arc::new(renderer), sink: Arc::new(FileSink::new(&out)) };
+    assert_eq!(export.execute(&ws, &ExportOptions::default()).unwrap(), 2);
     assert_eq!(page_count(&std::fs::read(&out).unwrap()), 2);
     assert!(!Path::new(&fx.dir.join("out.pdf.partial")).exists());
     drop(store);
@@ -242,7 +250,7 @@ fn capping_resolution_resamples_only_images_above_it() {
     let fx = Fixtures::new("downsample");
     let (_, renderer, import) = setup();
     let mut ws = Workspace::default();
-    import.execute(&mut ws, &[fx.jpeg()]);
+    import.execute(&mut ws, files(&[fx.jpeg()]));
     // 10 × 10 grid on 12×18 → ~1.1 × 1.7 in slots, so the 300×200 JPEG prints at ~170 dpi.
     ws.settings.layout = exhibit_domain::settings::LayoutMode::ByGrid { across: 10, down: 10 };
     let job = build_print_job(&ws);

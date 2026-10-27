@@ -1,13 +1,12 @@
 //! Opened artwork, kept in memory in the form the PDF writer needs.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use exhibit_domain::geometry::Size;
 use exhibit_domain::items::{ArtKind, ImportedSource, PageArt, SourceFormat, SourceId};
-use exhibit_domain::ports::{Bitmap, PortError, SourceLibrary};
+use exhibit_domain::ports::{Bitmap, PortError, SourceFile, SourceLibrary};
 use krilla::image::Image;
 use krilla::pdf::{Pdf, PdfDocument};
 
@@ -65,15 +64,13 @@ impl SourceStore {
 }
 
 impl SourceLibrary for SourceStore {
-    fn open(&self, path: &Path) -> Result<ImportedSource, PortError> {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        let format = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .and_then(SourceFormat::from_extension)
+    fn open(&self, file: SourceFile) -> Result<ImportedSource, PortError> {
+        let SourceFile { name, bytes } = file;
+        let format = name
+            .rsplit_once('.')
+            .and_then(|(_, extension)| SourceFormat::from_extension(extension))
             .ok_or_else(|| PortError(format!("{name}: unsupported file type")))?;
-        let bytes = std::fs::read(path).map_err(|e| PortError(format!("{name}: {e}")))?;
-        let (content, pages) = load(path, format, bytes).map_err(|e| PortError(format!("{name}: {e}")))?;
+        let (content, pages) = load(format, bytes).map_err(|e| PortError(format!("{name}: {e}")))?;
 
         let id = SourceId(self.next.fetch_add(1, Ordering::Relaxed) + 1);
         self.entries
@@ -95,7 +92,7 @@ impl SourceLibrary for SourceStore {
     }
 }
 
-fn load(path: &Path, format: SourceFormat, bytes: Vec<u8>) -> Result<(Content, Vec<PageArt>), String> {
+fn load(format: SourceFormat, bytes: Vec<u8>) -> Result<(Content, Vec<PageArt>), String> {
     let bytes = Arc::new(bytes);
     let raster = |w: u32, h: u32| {
         vec![PageArt { page: 0, size: Size::new(w as f64, h as f64), kind: ArtKind::Raster { width_px: w, height_px: h } }]
@@ -123,7 +120,7 @@ fn load(path: &Path, format: SourceFormat, bytes: Vec<u8>) -> Result<(Content, V
             (Content::Pdf { document: PdfDocument::new(Arc::new(pdf)), pages: sizes }, pages)
         }
         SourceFormat::Svg => {
-            let tree = parse_svg(path, &bytes)?;
+            let tree = parse_svg(&bytes)?;
             // usvg works in CSS pixels (96 per inch); the page wants points.
             let size = Size::new(tree.size().width() as f64 * 0.75, tree.size().height() as f64 * 0.75);
             (Content::Svg(Arc::new(tree)), vec![PageArt { page: 0, size, kind: ArtKind::Vector }])
@@ -163,17 +160,15 @@ fn load(path: &Path, format: SourceFormat, bytes: Vec<u8>) -> Result<(Content, V
     })
 }
 
-fn parse_svg(path: &Path, bytes: &[u8]) -> Result<usvg::Tree, String> {
+/// Images the SVG links by file path can't be found (there's no folder to look in); embedded
+/// images are fine.
+fn parse_svg(bytes: &[u8]) -> Result<usvg::Tree, String> {
     static FONTS: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
     let fonts = FONTS.get_or_init(|| {
         let mut db = usvg::fontdb::Database::new();
         db.load_system_fonts();
         Arc::new(db)
     });
-    let options = usvg::Options {
-        resources_dir: path.parent().map(Path::to_path_buf),
-        fontdb: fonts.clone(),
-        ..usvg::Options::default()
-    };
+    let options = usvg::Options { fontdb: fonts.clone(), ..usvg::Options::default() };
     usvg::Tree::from_data(bytes, &options).map_err(|e| e.to_string())
 }

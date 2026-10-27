@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use exhibit_data::{FileSink, KrillaRenderer, SourceStore};
 use exhibit_domain::items::{ItemId, SourceFormat, SourceId};
-use exhibit_domain::ports::{Bitmap, ExportOptions};
+use exhibit_domain::ports::{Bitmap, ExportOptions, SourceFile};
 use exhibit_domain::usecases::{
     CheckExport, ClearItems, ExportPdf, GetThumbnail, ImportFiles, PlanSheets, RemoveItem, RenderPreview,
     ReorderItems, SetItemCopies, SplitPack, UpdateSettings,
@@ -38,7 +38,8 @@ impl AppState {
             return;
         }
         let import = ImportFiles { library: self.store.clone() };
-        let opened = import.open(&paths);
+        let (files, _) = read_files(paths);
+        let opened = import.open(files);
         if let Ok(mut workspace) = self.workspace() {
             import.add(&mut workspace, opened);
         }
@@ -93,13 +94,26 @@ pub async fn pick_files(app: AppHandle, state: State<'_, AppState>) -> Result<Im
 fn import(state: &AppState, paths: Vec<PathBuf>) -> Result<ImportResultDto, String> {
     // Decode outside the lock: big files take a while and other commands shouldn't wait.
     let import = ImportFiles { library: state.store.clone() };
-    let opened = import.open(&paths);
+    let (files, mut failed) = read_files(paths);
+    let opened = import.open(files);
     let mut workspace = state.workspace()?;
     let report = import.add(&mut workspace, opened);
-    Ok(ImportResultDto {
-        state: state_of(&workspace),
-        failed: report.failed.into_iter().map(|(_, e)| e.0).collect(),
-    })
+    failed.extend(report.failed.into_iter().map(|(_, e)| e.0));
+    Ok(ImportResultDto { state: state_of(&workspace), failed })
+}
+
+/// Reads files from disk for import. Unreadable files come back as messages naming them.
+fn read_files(paths: Vec<PathBuf>) -> (Vec<SourceFile>, Vec<String>) {
+    let mut files = Vec::new();
+    let mut failed = Vec::new();
+    for path in paths {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        match std::fs::read(&path) {
+            Ok(bytes) => files.push(SourceFile { name, bytes }),
+            Err(e) => failed.push(format!("{name}: {e}")),
+        }
+    }
+    (files, failed)
 }
 
 #[tauri::command]
@@ -186,7 +200,7 @@ pub async fn export_pdf(
     };
     let path = target.into_path().map_err(|e| e.to_string())?;
     let workspace = state.snapshot()?;
-    let export = ExportPdf { renderer: state.renderer.clone(), sink: Arc::new(FileSink) };
-    let sheets = export.execute(&workspace, &path, &ExportOptions { max_dpi }).map_err(|e| e.0)?;
+    let export = ExportPdf { renderer: state.renderer.clone(), sink: Arc::new(FileSink::new(&path)) };
+    let sheets = export.execute(&workspace, &ExportOptions { max_dpi }).map_err(|e| e.0)?;
     Ok(Some(ExportResultDto { path: path.display().to_string(), sheets }))
 }

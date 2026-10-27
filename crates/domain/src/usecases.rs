@@ -1,12 +1,11 @@
 //! The only ways into the domain. One struct per use case.
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::items::{ImportedSource, ItemId, SourceId};
 use crate::job::{HeavySheet, PrintJob, build_print_job, heavy_sheets};
 use crate::layout::{SlotLayout, layout_slots};
-use crate::ports::{Bitmap, DocumentSink, ExportOptions, PortError, SheetRenderer, SourceLibrary};
+use crate::ports::{Bitmap, DocumentSink, ExportOptions, PortError, SheetRenderer, SourceFile, SourceLibrary};
 use crate::settings::{JobSettings, LayoutMode};
 use crate::workspace::{Workspace, WorkspaceError};
 
@@ -17,34 +16,36 @@ pub struct ImportFiles {
 #[derive(Debug, Default)]
 pub struct ImportReport {
     pub added: Vec<ItemId>,
-    pub failed: Vec<(PathBuf, PortError)>,
+    /// File name and why it failed.
+    pub failed: Vec<(String, PortError)>,
 }
 
 /// Files opened but not yet in the workspace.
 #[derive(Debug, Default)]
 pub struct OpenedFiles {
     sources: Vec<ImportedSource>,
-    failed: Vec<(PathBuf, PortError)>,
+    failed: Vec<(String, PortError)>,
 }
 
 impl ImportFiles {
-    /// Files that fail don't stop the rest; each failure is reported with its path.
-    pub fn execute(&self, workspace: &mut Workspace, paths: &[PathBuf]) -> ImportReport {
-        let opened = self.open(paths);
+    /// Files that fail don't stop the rest; each failure is reported with its file name.
+    pub fn execute(&self, workspace: &mut Workspace, files: Vec<SourceFile>) -> ImportReport {
+        let opened = self.open(files);
         self.add(workspace, opened)
     }
 
     /// The slow half: decoding. Needs no access to the workspace.
-    pub fn open(&self, paths: &[PathBuf]) -> OpenedFiles {
+    pub fn open(&self, files: Vec<SourceFile>) -> OpenedFiles {
         let mut opened = OpenedFiles::default();
-        for path in paths {
-            match self.library.open(path) {
+        for file in files {
+            let name = file.name.clone();
+            match self.library.open(file) {
                 Ok(source) if source.pages.is_empty() => {
                     self.library.release(source.id);
-                    opened.failed.push((path.clone(), PortError("the file has no pages".into())));
+                    opened.failed.push((name, PortError("the file has no pages".into())));
                 }
                 Ok(source) => opened.sources.push(source),
-                Err(error) => opened.failed.push((path.clone(), error)),
+                Err(error) => opened.failed.push((name, error)),
             }
         }
         opened
@@ -189,13 +190,13 @@ pub struct ExportPdf {
 
 impl ExportPdf {
     /// Returns the number of sheets written.
-    pub fn execute(&self, workspace: &Workspace, path: &Path, options: &ExportOptions) -> Result<usize, PortError> {
+    pub fn execute(&self, workspace: &Workspace, options: &ExportOptions) -> Result<usize, PortError> {
         let job = build_print_job(workspace);
         if job.sheets.is_empty() {
             return Err(PortError("there are no sheets to export".into()));
         }
         let bytes = self.renderer.render_pdf(&job, options)?;
-        self.sink.write(path, &bytes)?;
+        self.sink.write(&bytes)?;
         Ok(job.sheets.len())
     }
 }

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use exhibit_data::{FileSink, KrillaRenderer, SourceStore};
-use exhibit_domain::ports::ExportOptions;
+use exhibit_domain::ports::{ExportOptions, SourceFile};
 use exhibit_domain::settings::BleedMode;
 use exhibit_domain::usecases::{ExportPdf, ImportFiles};
 use exhibit_domain::workspace::Workspace;
@@ -19,15 +19,21 @@ fn main() {
             "--edge" => workspace.settings.bleed.mode = BleedMode::Edge,
             "--scale" => workspace.settings.bleed.mode = BleedMode::Scale,
             "--trim" => workspace.settings.marks.trim_lines = true,
-            _ => files.push(PathBuf::from(arg)),
+            _ => files.push(read(&arg)),
         }
     }
     let store = Arc::new(SourceStore::default());
-    let report = ImportFiles { library: store.clone() }.execute(&mut workspace, &files);
-    for (path, error) in &report.failed {
-        eprintln!("{}: {error}", path.display());
+    let report = ImportFiles { library: store.clone() }.execute(&mut workspace, files);
+    for (_, error) in &report.failed {
+        eprintln!("{error}");
     }
-    let export = ExportPdf { renderer: Arc::new(KrillaRenderer::new(store)), sink: Arc::new(FileSink) };
-    let sheets = export.execute(&workspace, &out, &ExportOptions::default()).expect("export");
+    let export = ExportPdf { renderer: Arc::new(KrillaRenderer::new(store)), sink: Arc::new(FileSink::new(&out)) };
+    let sheets = export.execute(&workspace, &ExportOptions::default()).expect("export");
     println!("{sheets} sheets → {}", out.display());
+}
+
+fn read(arg: &str) -> SourceFile {
+    let path = PathBuf::from(arg);
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    SourceFile { bytes: std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}")), name }
 }

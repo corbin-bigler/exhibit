@@ -1,12 +1,21 @@
-use std::path::Path;
+use std::path::PathBuf;
 
 use exhibit_domain::ports::{DocumentSink, PortError};
 
 /// Writes next to the target and renames over it, so a failed export never leaves half a file.
-pub struct FileSink;
+pub struct FileSink {
+    path: PathBuf,
+}
+
+impl FileSink {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
 
 impl DocumentSink for FileSink {
-    fn write(&self, path: &Path, bytes: &[u8]) -> Result<(), PortError> {
+    fn write(&self, bytes: &[u8]) -> Result<(), PortError> {
+        let path = &self.path;
         let temp = path.with_extension("pdf.partial");
         std::fs::write(&temp, bytes).map_err(|e| PortError(format!("couldn't write {}: {e}", temp.display())))?;
         std::fs::rename(&temp, path).map_err(|e| {
