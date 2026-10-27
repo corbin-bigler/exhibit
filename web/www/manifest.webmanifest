@@ -1,0 +1,32 @@
+{
+  "name": "Steamroller Exhibit",
+  "short_name": "Exhibit",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ED1C24",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "application/pdf": [".pdf"],
+        "image/svg+xml": [".svg"],
+        "image/jpeg": [".jpg", ".jpeg", ".jfif"],
+        "image/png": [".png"],
+        "image/webp": [".webp"],
+        "image/gif": [".gif"],
+        "image/bmp": [".bmp"],
+        "image/tiff": [".tif", ".tiff"],
+        "image/jxl": [".jxl"],
+        "image/heic": [".heic", ".heif"],
+        "image/avif": [".avif"]
+      },
+      "launch_type": "single-client"
+    }
+  ]
+}

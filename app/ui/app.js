@@ -1,8 +1,6 @@
 "use strict";
 
-const { invoke } = window.__TAURI__.core;
-const appWindow = window.__TAURI__.window.getCurrentWindow();
-const webview = window.__TAURI__.webview.getCurrentWebview();
+const { invoke } = window.platform;
 
 const $ = (id) => document.getElementById(id);
 const POINTS_PER = { in: 72, mm: 72 / 25.4 };
@@ -145,7 +143,11 @@ $("drop-zone").addEventListener("click", importPicked);
 $("clear-all").addEventListener("click", () => apply("clear_items"));
 
 async function importPicked() {
-  showImport(await call("pick_files"));
+  try {
+    showImport(await platform.pickFiles());
+  } catch (error) {
+    toast(String(error), "error");
+  }
 }
 
 function showImport(result) {
@@ -154,12 +156,9 @@ function showImport(result) {
   for (const failure of result.failed) toast(failure, "error");
 }
 
-webview.onDragDropEvent((event) => {
-  const { type } = event.payload;
-  $("drop-veil").classList.toggle("on", type === "enter" || type === "over");
-  if (type === "drop" && event.payload.paths.length) {
-    call("import_files", { paths: event.payload.paths }).then(showImport, () => {});
-  }
+platform.onFilesArrive({
+  hover: (on) => $("drop-veil").classList.toggle("on", on),
+  arrived: (result) => result.then(showImport, (error) => toast(String(error), "error")),
 });
 
 const ICONS = {
@@ -365,8 +364,10 @@ $("export").addEventListener("click", async () => {
   const button = $("export");
   button.disabled = true;
   try {
-    const result = await call("export_pdf", { maxDpi });
-    if (result) toast(`Saved ${result.sheets} ${result.sheets === 1 ? "sheet" : "sheets"} · ${result.path}`);
+    const result = await platform.exportPdf(maxDpi);
+    if (result) toast(`Saved ${result.sheets} ${result.sheets === 1 ? "sheet" : "sheets"} · ${result.where}`);
+  } catch (error) {
+    toast(String(error), "error");
   } finally {
     renderSheetControls();
   }
@@ -385,9 +386,13 @@ function askAboutHeavySheets(heavy) {
 
 // ---------- window ----------
 
-$("wc-min").addEventListener("click", () => appWindow.minimize());
-$("wc-max").addEventListener("click", () => appWindow.toggleMaximize());
-$("wc-close").addEventListener("click", () => appWindow.close());
+if (platform.window) {
+  $("wc-min").addEventListener("click", () => platform.window.minimize());
+  $("wc-max").addEventListener("click", () => platform.window.toggleMaximize());
+  $("wc-close").addEventListener("click", () => platform.window.close());
+} else {
+  document.querySelector(".window-controls").hidden = true;
+}
 
 // ---------- render ----------
 

@@ -38,6 +38,28 @@ look are marked ★.
    - **SVGs that link images by file path lose them** (there's no folder to resolve against).
      Embedded `data:` images, the usual case for print, are unaffected.
    - **WIC decodes from memory** (`IWICStream`), not a file name.
+6b. ★ **Two thin shells around one session.** `crates/session` holds the workspace and every
+   command the UI runs (plus the DTOs, moved out of `app`). `app` (Tauri) and `web`
+   (wasm-bindgen) only supply files and save output their own way.
+   - **New dependencies for `web`:** `wasm-bindgen`, `js-sys`, `serde-wasm-bindgen`, `serde`.
+     Build tool: `wasm-bindgen-cli` (must match the crate version in `Cargo.lock`).
+   - **The web build runs in a Web Worker**, so imports and exports never freeze the page. The
+     worker speaks the same command names and arguments as Tauri's `invoke`.
+   - **`app/ui/platform.js` picks Tauri or browser at runtime** (`window.__TAURI__`): file
+     picking, drops, saving and window buttons. The UI files are shared, not copied.
+   - **Browser saving:** Chrome/Edge show a real Save As (`showSaveFilePicker`), opened before
+     rendering; other browsers download `exhibit.pdf`.
+   - **Installable (PWA) with "Open with"** via the manifest's `file_handlers` (Chrome/Edge).
+     No service worker, so no offline caching yet.
+   - **`[profile.web]`** adds LTO and stripping: 10.9 MB WebAssembly, 3.8 MB gzipped.
+   - **HEIC/AVIF don't open in the browser yet**: they need the shared libheif decoder, which
+     is waiting on your licensing call (LGPL, HEVC patents).
+6c. **SVG text whose font is missing is an import error** ("convert the text to outlines")
+   rather than silently vanishing. In a browser no installed fonts are readable, so any live SVG
+   text hits this; on Windows it only happens if no font matches at all.
+6d. **Decoded images are turned into a PDF image once per file**, not per draw. Every copy and
+   bleed piece used to recompress the pixels: a 16-bit TIFF 4-up with Mirror bleed took 11 s
+   natively and 41 s in the browser, now about 1 s in both.
 6. **Custom title bar** (`decorations: false`) to match the design. Downside: Windows 11's
    snap-layout flyout on the maximise button is lost. Can be restored with a plugin or by going
    back to the native title bar.

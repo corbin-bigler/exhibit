@@ -24,3 +24,23 @@ impl DocumentSink for FileSink {
         })
     }
 }
+
+/// Keeps the file in memory, for shells that save it themselves (the browser).
+#[derive(Default)]
+pub struct MemorySink {
+    bytes: std::sync::Mutex<Vec<u8>>,
+}
+
+impl MemorySink {
+    /// The last file written; empty before any write.
+    pub fn take(&self) -> Vec<u8> {
+        self.bytes.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default()
+    }
+}
+
+impl DocumentSink for MemorySink {
+    fn write(&self, bytes: &[u8]) -> Result<(), PortError> {
+        *self.bytes.lock().map_err(|_| PortError("export buffer is unavailable".into()))? = bytes.to_vec();
+        Ok(())
+    }
+}

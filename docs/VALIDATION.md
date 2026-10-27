@@ -127,3 +127,12 @@ Run the automated checks with `cargo test --workspace`.
 | X-03 | Large job performance | 50 files / 200 sheets exports < 30 s, UI stays responsive | manual | ⬜ |
 | X-04 | Heavy-sheet check | > 500 MP raster per sheet → dialog: downsample to N dpi / export anyway / cancel | unit + integration + manual | ✅ logic · 🟡 dialog |
 | X-05 | Downsample keeps quality where it can | Only images above the cap resampled; ICC kept | integration | ✅ |
+| W-01 | Web build loads | `web/build.ps1` → page loads, state from the worker, no console errors | manual (Chrome) | ✅ |
+| W-02 | Web import by drop | Files dropped on the page import; bad files reported by name | manual (Chrome) | ✅ |
+| W-03 | Web import by Add files | Browser file picker, multi-select, artwork types only | manual | 🟡 |
+| W-04 | Web export | Save picker (Chrome/Edge) or download; same PDF as the Windows app | manual (Chrome, bytes) | ✅ bytes · 🟡 picker |
+| W-05 | Web editing | Settings, grid, split, reorder (drag), copies, remove, sheet stepper | manual (Chrome) | ✅ |
+| W-06 | Web heavy job | 8K photo 6 × 10: heavy check, downsample and full exports succeed | manual (Chrome) | ✅ |
+| W-07 | SVG text without fonts | Reported as an error naming the file, not dropped silently | unit + manual (Chrome) | ✅ |
+| W-08 | Installable + "Open with" | Install from Chrome/Edge; open a PDF with Exhibit from Explorer | manual | 🟡 |
+| W-09 | HEIC / AVIF on the web | Imports like the Windows app | — | ⬜ decoder not chosen |

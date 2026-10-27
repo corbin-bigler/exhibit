@@ -10,4 +10,4 @@ mod wic;
 
 pub use library::SourceStore;
 pub use render::KrillaRenderer;
-pub use sink::FileSink;
+pub use sink::{FileSink, MemorySink};
