@@ -1,7 +1,7 @@
 //! Opened artwork, kept in memory in the form the PDF writer needs.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use exhibit_domain::geometry::Size;
@@ -177,10 +177,56 @@ fn load(format: SourceFormat, bytes: Vec<u8>) -> Result<(Content, Vec<PageArt>),
 fn parse_svg(bytes: &[u8]) -> Result<usvg::Tree, String> {
     static FONTS: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
     let fonts = FONTS.get_or_init(|| {
+        // Finds nothing in a browser, where pages can't read installed fonts.
         let mut db = usvg::fontdb::Database::new();
         db.load_system_fonts();
         Arc::new(db)
     });
-    let options = usvg::Options { fontdb: fonts.clone(), ..usvg::Options::default() };
-    usvg::Tree::from_data(bytes, &options).map_err(|e| e.to_string())
+    parse_svg_with(bytes, fonts.clone())
+}
+
+/// Text whose font can't be found would silently vanish from the print, so it's an error instead.
+fn parse_svg_with(bytes: &[u8], fonts: Arc<usvg::fontdb::Database>) -> Result<usvg::Tree, String> {
+    let font_missing = Arc::new(AtomicBool::new(false));
+    let select = usvg::FontResolver::default_font_selector();
+    let flag = font_missing.clone();
+    let options = usvg::Options {
+        fontdb: fonts,
+        font_resolver: usvg::FontResolver {
+            select_font: Box::new(move |font, db| {
+                let found = select(font, db);
+                if found.is_none() {
+                    flag.store(true, Ordering::Relaxed);
+                }
+                found
+            }),
+            select_fallback: usvg::FontResolver::default_fallback_selector(),
+        },
+        ..usvg::Options::default()
+    };
+    let tree = usvg::Tree::from_data(bytes, &options).map_err(|e| e.to_string())?;
+    if font_missing.load(Ordering::Relaxed) {
+        return Err("its text uses fonts that aren't available here. Convert the text to outlines".into());
+    }
+    Ok(tree)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEXT_SVG: &[u8] =
+        br#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40"><text x="5" y="30">Hi</text></svg>"#;
+
+    #[test]
+    fn svg_text_without_fonts_is_an_error() {
+        let error = parse_svg_with(TEXT_SVG, Arc::new(usvg::fontdb::Database::new())).unwrap_err();
+        assert!(error.contains("outlines"), "{error}");
+    }
+
+    #[test]
+    fn svg_without_text_needs_no_fonts() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>"#;
+        assert!(parse_svg_with(svg, Arc::new(usvg::fontdb::Database::new())).is_ok());
+    }
 }
