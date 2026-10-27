@@ -12,7 +12,9 @@ use windows::Win32::Graphics::Imaging::{
     IWICImagingFactory, IWICPixelFormatInfo, WICColorContextProfile, WICConvertBitmapSource,
     WICDecodeMetadataCacheOnDemand,
 };
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
+use windows::Win32::System::Com::{
+    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+};
 use windows::core::{HSTRING, Interface};
 
 use crate::decode::{DecodedImage, fingerprint};
@@ -32,7 +34,9 @@ pub fn decode(path: &Path, file_bytes: &[u8]) -> Result<DecodedImage, String> {
 unsafe fn decode_unsafe(path: &Path, file_bytes: &[u8]) -> windows::core::Result<DecodedImage> {
     unsafe {
         // Already initialised on this thread is fine; a different apartment is fine for WIC too.
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        // Undo our own initialisation afterwards: left in place on the main thread it stops the
+        // window from setting up drag and drop, which needs a single-threaded apartment.
+        let _com = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok().then_some(ComScope);
         let factory: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
         let decoder = factory.CreateDecoderFromFilename(
             &HSTRING::from(path.as_os_str()),
@@ -66,6 +70,15 @@ unsafe fn decode_unsafe(path: &Path, file_bytes: &[u8]) -> windows::core::Result
         } else {
             DecodedImage::from_interleaved_u8(width, height, 4, true, &buffer, icc, print)
         })
+    }
+}
+
+/// Balances a successful `CoInitializeEx`. Declared before any COM object so it drops last.
+struct ComScope;
+
+impl Drop for ComScope {
+    fn drop(&mut self) {
+        unsafe { CoUninitialize() };
     }
 }
 
