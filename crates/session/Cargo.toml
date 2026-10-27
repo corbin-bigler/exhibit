@@ -1,0 +1,12 @@
+[package]
+name = "exhibit-session"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The commands both shells (Tauri and the web) expose, and the shapes they exchange with the UI.
+[dependencies]
+exhibit-domain = { path = "../domain" }
+exhibit-data = { path = "../data" }
+serde = { version = "1", features = ["derive"] }

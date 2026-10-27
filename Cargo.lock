@@ -875,7 +875,7 @@ version = "0.1.0"
 dependencies = [
  "exhibit-data",
  "exhibit-domain",
- "serde",
+ "exhibit-session",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -899,6 +899,28 @@ dependencies = [
 [[package]]
 name = "exhibit-domain"
 version = "0.1.0"
+
+[[package]]
+name = "exhibit-session"
+version = "0.1.0"
+dependencies = [
+ "exhibit-data",
+ "exhibit-domain",
+ "serde",
+]
+
+[[package]]
+name = "exhibit-web"
+version = "0.1.0"
+dependencies = [
+ "exhibit-data",
+ "exhibit-domain",
+ "exhibit-session",
+ "js-sys",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "fastrand"
@@ -3542,6 +3564,17 @@ dependencies = [
  "serde",
  "serde_core",
  "typeid",
+]
+
+[[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]
